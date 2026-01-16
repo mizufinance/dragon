@@ -548,13 +548,17 @@ func (o *BroadcastOperation) finishReconstruction(is *incomingState) {
 	haveLeaves := is.pt.HaveLeaves()
 	missedCount := uint(is.nData) + uint(is.nParity) - haveLeaves.Count()
 
-	missedLeaves := make([][]byte, 0, missedCount)
-	for u, ok := haveLeaves.NextClear(0); ok; u, ok = haveLeaves.NextClear(u + 1) {
-		missedLeaves = append(missedLeaves, is.shards[u])
-	}
+	// If we already have all leaves (e.g., received all data + parity chunks),
+	// we don't need to complete the tree - just signal that data is ready.
+	if missedCount > 0 {
+		missedLeaves := make([][]byte, 0, missedCount)
+		for u, ok := haveLeaves.NextClear(0); ok; u, ok = haveLeaves.NextClear(u + 1) {
+			missedLeaves = append(missedLeaves, is.shards[u])
+		}
 
-	c := is.pt.Complete(missedLeaves)
-	o.restorePackets(c, is)
+		c := is.pt.Complete(missedLeaves)
+		o.restorePackets(c, is)
+	}
 
 	// Data has been reconstructed.
 	// Notify any watchers.
