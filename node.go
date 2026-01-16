@@ -628,9 +628,10 @@ func (n *Node) handleIncomingJoin(
 			"remote_addr", qc.RemoteAddr().String(),
 		),
 
+		// TODO: make these configurable via NodeConfig.
 		Cfg: dbsacceptjoin.Config{
-			NeighborRequestTimeout: 100 * time.Millisecond,
-			NeighborReplyTimeout:   100 * time.Millisecond,
+			NeighborRequestTimeout: 500 * time.Millisecond,
+			NeighborReplyTimeout:   500 * time.Millisecond,
 		},
 
 		Conn: qc,

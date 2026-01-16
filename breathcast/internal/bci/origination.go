@@ -117,9 +117,9 @@ func openOriginationStream(
 	defer close(iosCh)
 
 	s, err := OpenStream(ctx, conn, OpenStreamConfig{
-		// TODO: make these configurable.
-		OpenStreamTimeout: 20 * time.Millisecond,
-		SendHeaderTimeout: 20 * time.Millisecond,
+		// TODO: make these configurable via NodeConfig.
+		OpenStreamTimeout: 100 * time.Millisecond,
+		SendHeaderTimeout: 100 * time.Millisecond,
 
 		ProtocolHeader: pHeader,
 		AppHeader:      appHeader,
@@ -141,12 +141,8 @@ func openOriginationStream(
 	peerHas := bitset.MustNew(uint(len(packets)))
 	dec := new(dbitset.AdaptiveDecoder)
 
-	// I would prefer the timeout for receiving the bitset to be lower,
-	// but at 10 milliseconds the broadcast integration test
-	// fails unacceptably frequently.
-	// I don't yet have an explanation on why
-	// the first bitset receive would possibly take that long.
-	const receiveBitsetTimeout = 20 * time.Millisecond
+	// TODO: make this configurable via NodeConfig.
+	const receiveBitsetTimeout = 100 * time.Millisecond
 
 	if err := dec.ReceiveBitset(
 		s,
