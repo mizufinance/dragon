@@ -267,7 +267,8 @@ func (a *ActiveView) handleAddRequest(ctx context.Context, req addRequest) {
 	}
 
 	// Channel for the peerInboundProcessor to send to the application connection.
-	appStreams := make(chan *dquicwrap.Stream, 4) // TODO: what is the right size?
+	// Increased from 4 to 16 for multi-protocol workloads (breathcast + wingspan).
+	appStreams := make(chan *dquicwrap.Stream, 16)
 
 	a.byCA[req.IPeer.CACertHandle] = req.IPeer
 	a.byLeaf[req.IPeer.LeafCertHandle] = req.IPeer
@@ -280,7 +281,8 @@ func (a *ActiveView) handleAddRequest(ctx context.Context, req addRequest) {
 			Peer:       req.IPeer.ToPeer(),
 			ActiveView: a,
 
-			DynamicHandlers: 4, // TODO: needs to be configurable.
+			// Increased from 4 to 16 for multi-protocol workloads.
+			DynamicHandlers: 16,
 
 			ApplicationStreams: appStreams,
 		},

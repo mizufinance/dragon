@@ -96,9 +96,10 @@ func DefaultConfig() *quic.Config {
 		// Skip: AllowConnectionWindowIncrease: we don't need a callback on this, at this point.
 
 		// How many streams allowed on a single connection.
-		// Just an estimate for now.
-		MaxIncomingStreams:    12, // Bidirectional.
-		MaxIncomingUniStreams: 6,
+		// Increased from 12/6 to support multi-protocol workloads
+		// (breathcast + wingspan + consensus simultaneously).
+		MaxIncomingStreams:    32, // Bidirectional.
+		MaxIncomingUniStreams: 16,
 
 		// Skip: KeepAlivePeriod: for now assuming we don't need keepalives,
 		// but that could change if we find idle timeouts happening.
