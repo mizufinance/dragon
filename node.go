@@ -402,7 +402,11 @@ func (n *Node) acceptConnections(ctx context.Context) {
 	for {
 		rawQC, err := n.quicListener.Accept(ctx)
 		if err != nil {
-			if errors.Is(context.Cause(ctx), err) {
+			// Check for context cancellation first - this is the normal shutdown path.
+			// We check ctx.Err() in addition to context.Cause() because the listener
+			// may return different errors during shutdown that aren't the exact
+			// context cancellation error.
+			if ctx.Err() != nil {
 				n.log.Info(
 					"Accept loop quitting due to context cancellation when accepting connection",
 					"cause", context.Cause(ctx),
@@ -410,7 +414,7 @@ func (n *Node) acceptConnections(ctx context.Context) {
 				return
 			}
 
-			// Debug-level because this could be spammy if we are getting a lot of garbage connections.
+			// Only log errors if context is still active (not during shutdown)
 			n.log.Debug(
 				"Failed to accept incoming connection",
 				"err", err,
@@ -461,7 +465,7 @@ func (n *Node) acceptConnections(ctx context.Context) {
 
 		res, err := p.Run(ctx)
 		if err != nil {
-			if errors.Is(context.Cause(ctx), err) {
+			if ctx.Err() != nil {
 				n.log.Info(
 					"Accept loop quitting due to context cancellation during incoming bootstrap",
 					"remote_addr", qc.RemoteAddr().String(),
@@ -506,7 +510,7 @@ func (n *Node) acceptConnections(ctx context.Context) {
 			}
 			if err := n.handleIncomingJoin(ctx, qc, res.AdmissionStream, chain, *res.JoinMessage); err != nil {
 				// On error, assume we have to close the connection.
-				if errors.Is(context.Cause(ctx), err) {
+				if ctx.Err() != nil {
 					n.log.Info(
 						"Accept loop quitting due to context cancellation during handling incoming join",
 						"remote_addr", qc.RemoteAddr().String(),
@@ -533,7 +537,7 @@ func (n *Node) acceptConnections(ctx context.Context) {
 		if res.NeighborMessage != nil {
 			if err := n.handleIncomingNeighbor(ctx, qc, res.AdmissionStream, chain, *res.NeighborMessage); err != nil {
 				// On error, assume we have to close the connection.
-				if errors.Is(context.Cause(ctx), err) {
+				if ctx.Err() != nil {
 					n.log.Info(
 						"Accept loop quitting due to context cancellation during handling incoming neighbor request",
 						"remote_addr", qc.RemoteAddr().String(),
