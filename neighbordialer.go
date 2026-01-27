@@ -161,8 +161,8 @@ func (d *neighborDialer) bootstrapNeighbor(
 			AdvertiseAddr: d.AdvertiseAddr,
 			Cert:          d.Cert,
 
-			OpenStreamTimeout:         100 * time.Millisecond,
-			AwaitNeighborReplyTimeout: 75 * time.Millisecond,
+			OpenStreamTimeout:         500 * time.Millisecond,
+			AwaitNeighborReplyTimeout: 500 * time.Millisecond,
 
 			NowFn: time.Now,
 		},

@@ -741,7 +741,7 @@ func (n *Node) handleIncomingNeighbor(
 			Admission: qs,
 
 			Cfg: dbsacceptneighbor.Config{
-				NeighborReplyTimeout: 50 * time.Millisecond,
+				NeighborReplyTimeout: 500 * time.Millisecond,
 			},
 		}
 		if err := p.RunReject(ctx); err != nil {
@@ -762,7 +762,7 @@ func (n *Node) handleIncomingNeighbor(
 		Admission: qs,
 
 		Cfg: dbsacceptneighbor.Config{
-			NeighborReplyTimeout: 50 * time.Millisecond,
+			NeighborReplyTimeout: 500 * time.Millisecond,
 		},
 	}
 
@@ -937,8 +937,8 @@ func (n *Node) bootstrapJoin(
 
 			// TODO: for now these are all hardcoded,
 			// but they need to be configurable.
-			OpenStreamTimeout:    100 * time.Millisecond,
-			AwaitNeighborTimeout: 100 * time.Millisecond,
+			OpenStreamTimeout:    500 * time.Millisecond,
+			AwaitNeighborTimeout: 500 * time.Millisecond,
 
 			// TODO: we should probably not rely on
 			// this particular method of getting our certificate.
