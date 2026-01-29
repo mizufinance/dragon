@@ -67,63 +67,78 @@ func New(log *slog.Logger, cfg Config) *Manager {
 }
 
 // ConsiderJoin accepts the peer if there is no existing active peer
-// from the same trusted CA.
+// from the same trusted CA, or if the existing peer may be stale
+// (e.g. after a crash). When a peer with the same CA already exists,
+// we accept the join so that AddActivePeer can replace the stale entry.
 func (m *Manager) ConsiderJoin(
 	_ context.Context, p dview.ActivePeer,
 ) (dview.JoinDecision, error) {
-	if _, ok := m.aByCA[p.Chain.RootHandle]; ok {
+	if existing, ok := m.aByCA[p.Chain.RootHandle]; ok {
 		// We already have an active peer from this CA.
-		return dview.DisconnectAndForwardJoinDecision, nil
+		// Accept anyway — the old connection may be stale (peer crashed).
+		// AddActivePeer will handle evicting the old entry.
+		m.log.Info(
+			"Accepting join from peer with existing CA (possible reconnection)",
+			"existing_remote_addr", existing.RemoteAddr.String(),
+			"new_remote_addr", p.RemoteAddr.String(),
+		)
+		return dview.AcceptJoinDecision, nil
 	}
 
 	// Otherwise it's acceptable.
 	return dview.AcceptJoinDecision, nil
 }
 
-// ConsiderNeighborRequest accepts the request
-// if there is no existing active peer from the same trusted CA.
+// ConsiderNeighborRequest accepts the request.
+// If a peer with the same CA already exists, we still accept
+// because the old connection may be stale (peer crashed and reconnected).
 func (m *Manager) ConsiderNeighborRequest(
 	_ context.Context, p dview.ActivePeer,
 ) (bool, error) {
-	_, have := m.aByCA[p.Chain.RootHandle]
-
-	// Acceptable if we don't already have an active peer from this CA.
-	return !have, nil
+	return true, nil
 }
 
 // ConsiderForwardJoin always continues forwarding,
-// and it wants to connect to the new neighbor
-// if we don't already have one from the same CA.
+// and always wants to connect to the neighbor
+// (even if we already have one from the same CA, since it may be stale).
 func (m *Manager) ConsiderForwardJoin(
 	_ context.Context, aa daddr.AddressAttestation, chain dcert.Chain,
 ) (dview.ForwardJoinDecision, error) {
-	_, alreadyHaveCA := m.aByCA[chain.RootHandle]
-
 	return dview.ForwardJoinDecision{
 		ContinueForwarding:  true,
-		MakeNeighborRequest: !alreadyHaveCA,
+		MakeNeighborRequest: true,
 	}, nil
 }
 
 func (m *Manager) AddActivePeer(
 	_ context.Context, p dview.ActivePeer,
 ) (evicted *dview.ActivePeer, err error) {
-	// Make sure we don't have an active peer with the same CA.
+	sameCAReplace := false
 	if _, ok := m.aByCA[p.Chain.RootHandle]; ok {
-		// We already have an active peer from this CA.
-		return nil, dview.ErrAlreadyActiveCA
+		// Peer with same CA exists (crash recovery reconnection).
+		// Update our internal map but don't return evicted — the ActiveView
+		// will handle closing the old connection when it processes the add.
+		// Returning evicted for same-CA replacement causes the kernel to call
+		// av.Remove(evicted) which looks up by CA handle, removing the NEW peer.
+		m.log.Info(
+			"Replacing peer with same CA in view manager (crash recovery)",
+			"ca_handle", p.Chain.RootHandle.String(),
+			"new_remote_addr", p.RemoteAddr.String(),
+		)
+		delete(m.aByCA, p.Chain.RootHandle)
+		sameCAReplace = true
 	}
 
-	// We don't have an active peer with the same CA,
-	// so we can afford to add it.
-	// If we are under the active limit, we need to pick a peer to evict, though.
-	var deleteActiveKey dcert.CACertHandle
-	if len(m.aByCA) >= m.aLimit {
+	// If we are at the active limit (and didn't already free a slot above),
+	// we need to pick a peer to evict. This evicts a DIFFERENT CA,
+	// so it's safe for the kernel to call av.Remove on it.
+	if !sameCAReplace && len(m.aByCA) >= m.aLimit {
+		var deleteActiveKey dcert.CACertHandle
 		deleteActiveKey, evicted = m.randomActivePeer()
+		delete(m.aByCA, deleteActiveKey)
 	}
 
 	m.aByCA[p.Chain.RootHandle] = &p
-	delete(m.aByCA, deleteActiveKey)
 
 	// We can just attempt to delete the passive peer if one exists,
 	// without doing a lookup first.
@@ -133,12 +148,12 @@ func (m *Manager) AddActivePeer(
 
 func (m *Manager) RemoveActivePeer(_ context.Context, p dview.ActivePeer) {
 	if _, ok := m.aByCA[p.Chain.RootHandle]; !ok {
-		// Wasn't in the active set.
-		// We'll panic here for now at least.
-		// Seems like the kernel should prevent this from happening.
-		panic(fmt.Errorf(
-			"BUG: attempted to remove active peer who was not in the active set",
-		))
+		// Peer was already removed (e.g. replaced during crash recovery).
+		m.log.Info(
+			"Peer already removed from active set (possible crash recovery cleanup)",
+			"ca_handle", p.Chain.RootHandle.String(),
+		)
+		return
 	}
 
 	delete(m.aByCA, p.Chain.RootHandle)

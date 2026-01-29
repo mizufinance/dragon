@@ -257,13 +257,44 @@ func (a *ActiveView) Add(ctx context.Context, p Peer) error {
 }
 
 func (a *ActiveView) handleAddRequest(ctx context.Context, req addRequest) {
-	if _, ok := a.byCA[req.IPeer.CACertHandle]; ok {
-		// We might not want to panic here if and when allowing active connections
-		// to "cousin" peers (who have the same CA and are highly trusted).
-		panic(fmt.Errorf(
-			"BUG: attempted to add peer with CA handle %q when one already existed",
-			req.IPeer.CACertHandle.String(),
-		))
+	if existing, ok := a.byCA[req.IPeer.CACertHandle]; ok {
+		// A peer with the same CA already exists. This happens during
+		// crash recovery when a peer reconnects with a new QUIC connection.
+		// Clean up the stale entry before adding the new one.
+		a.log.Info(
+			"Replacing stale peer with same CA (crash recovery)",
+			"ca_handle", req.IPeer.CACertHandle.String(),
+			"old_remote_addr", existing.Conn.RemoteAddr().String(),
+			"new_remote_addr", req.IPeer.Conn.RemoteAddr().String(),
+		)
+
+		// Close the old connection
+		oldDC := a.dconnByLeafCert[existing.LeafCertHandle]
+		if err := oldDC.QUIC.CloseWithError(1, "replacing stale connection"); err != nil {
+			a.log.Info("Error closing stale connection during replacement", "err", err)
+		}
+
+		// Cancel the old processor
+		if proc, ok := a.processors[existing.CACertHandle]; ok {
+			proc.Cancel()
+			delete(a.processors, existing.CACertHandle)
+		}
+
+		// Remove old entries from maps
+		delete(a.byCA, existing.CACertHandle)
+		delete(a.byLeaf, existing.LeafCertHandle)
+		delete(a.dconnByLeafCert, existing.LeafCertHandle)
+
+		// Notify about the removed connection
+		select {
+		case <-ctx.Done():
+			a.log.Warn("Context canceled while sending stale connection removal notification")
+		case a.connectionChanges <- dconn.Change{
+			Conn:   oldDC,
+			Adding: false,
+		}:
+			// Okay.
+		}
 	}
 
 	// Channel for the peerInboundProcessor to send to the application connection.
@@ -355,10 +386,13 @@ func (a *ActiveView) Remove(ctx context.Context, pid PeerCertID) error {
 
 func (a *ActiveView) handleRemoveRequest(ctx context.Context, req removeRequest) {
 	if _, ok := a.byCA[req.PCI.caHandle]; !ok {
-		panic(fmt.Errorf(
-			"BUG: attempted to remove peer with CA handle %q when none existed",
-			req.PCI.caHandle.String(),
-		))
+		// The peer was already removed (e.g. during crash recovery replacement).
+		a.log.Info(
+			"Peer already removed from active view (possible crash recovery cleanup)",
+			"ca_handle", req.PCI.caHandle.String(),
+		)
+		close(req.Resp)
+		return
 	}
 
 	delete(a.byCA, req.PCI.caHandle)
